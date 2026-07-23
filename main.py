@@ -3,6 +3,7 @@ import json
 from contextlib import asynccontextmanager
 from enum import Enum
 from typing import Any
+import unicodedata
 
 import pandas as pd
 import plotly.express as px
@@ -17,7 +18,7 @@ from pydantic import BaseModel
 # Configuração / Banco de dados
 # ---------------------------------------------------------------------------
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
+DATABASE_URL = os.environ.get("DATABASE_URL", 'postgresql://postgres.gcinjvvtmgmuqjicgurd:G6y6LHwJHCcyTuLR@aws-1-us-east-2.pooler.supabase.com:6543/postgres')
 if not DATABASE_URL:
     raise RuntimeError(
         "Variável de ambiente DATABASE_URL não definida. "
@@ -351,11 +352,51 @@ def montar_figura(df_ordenado: pd.DataFrame, nome_indicador: str, regiao: str, s
 # Modelos / Enums da API
 # ---------------------------------------------------------------------------
 
-class Indicador(str, Enum):
-    area = "area"
-    densidade = "densidade"
-    populacao = "populacao"
 
+def normalizar(texto):
+  texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
+  return texto.strip().lower().replace(" ", "_").replace("-", "_")
+class Indicador(str, Enum):
+  area = "area"
+  densidade = "densidade"
+  populacao = "populacao"
+
+class Regiao(str, Enum):
+  brasil = 'brasil'
+  norte = 'norte'
+  nordeste = 'nordeste'
+  sudeste = 'sudeste'
+  sul = 'sul'
+  centro_oeste = 'centro-oeste'
+  
+class Estados(str, Enum):
+  acre = "acre"
+  alagoas = "alagoas"
+  amapa = "amapa"
+  amazonas = "amazonas"
+  bahia = "bahia"
+  ceara = "ceara"
+  distrito_federal = "distrito_federal"
+  espirito_santo = "espirito_santo"
+  goias = "goias"
+  maranhao = "maranhao"
+  mato_grosso = "mato_grosso"
+  mato_grosso_do_sul = "mato_grosso_do_sul"
+  minas_gerais = "minas_gerais"
+  para = "para"
+  paraiba = "paraiba"
+  parana = "parana"
+  pernambuco = "pernambuco"
+  piaui = "piaui"
+  rio_de_janeiro = "rio_de_janeiro"
+  rio_grande_do_norte = "rio_grande_do_norte"
+  rio_grande_do_sul = "rio_grande_do_sul"
+  rondonia = "rondonia"
+  roraima = "roraima"
+  santa_catarina = "santa_catarina"
+  sao_paulo = "sao_paulo"
+  sergipe = "sergipe"
+  tocantins = "tocantins"
 
 class Regiao(str, Enum):
     brasil = "brasil"
@@ -370,13 +411,11 @@ class KPIItem(BaseModel):
     nome: str
     valor: float
 
-
 class KPIs(BaseModel):
     total: int
     menor: KPIItem
     maior: KPIItem
     media: float
-
 
 class GraficoResponse(BaseModel):
     indicador: str
@@ -384,6 +423,19 @@ class GraficoResponse(BaseModel):
     figura: dict[str, Any]
     kpis: KPIs
 
+class IndicadorItem(BaseModel):
+    nome: str
+    valor: float
+    regiao: str
+
+class Indicadores(BaseModel):
+    area: IndicadorItem
+    densidade: IndicadorItem
+    populacao: IndicadorItem
+
+class IndicadoresResponse(BaseModel):
+    estado: str
+    indicadores: Indicadores
 
 # ---------------------------------------------------------------------------
 # FastAPI — dados carregados no startup (não na importação do módulo)
@@ -465,3 +517,27 @@ def grafico(indicador: Indicador, regiao: Regiao = Regiao.brasil):
             "media": kpis["media"],
         },
     }
+
+@app.get('/indicadores', response_model=IndicadoresResponse)
+def todos_indicadores(estado: Estados):
+  estado_norm = estado.value
+  resultado = {}
+
+  for nome_indicador, df in DFs.items():
+    linha = df[df['nome'].apply(normalizar) == estado_norm]
+
+    if linha.empty:
+      resultado[nome_indicador] = None
+      continue
+
+    row = linha.iloc[0]
+    resultado[nome_indicador] = {
+        "nome": row["nome"],
+        "valor": float(row["valor"]),
+        "regiao": row["regiao"],
+    }
+
+  return {
+      'estado': estado.value,
+      'indicadores': resultado
+  }
