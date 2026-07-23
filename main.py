@@ -6,7 +6,7 @@ from typing import Any
 import unicodedata
 
 import pandas as pd
-import plotly.express as px
+import plotly.graph_objects as go
 import requests
 from psycopg2 import pool as pg_pool
 from psycopg2.extras import Json
@@ -18,7 +18,7 @@ from pydantic import BaseModel
 # Configuração / Banco de dados
 # ---------------------------------------------------------------------------
 
-DATABASE_URL = os.environ.get("DATABASE_URL", 'postgresql://postgres.gcinjvvtmgmuqjicgurd:G6y6LHwJHCcyTuLR@aws-1-us-east-2.pooler.supabase.com:6543/postgres')
+DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError(
         "Variável de ambiente DATABASE_URL não definida. "
@@ -305,49 +305,96 @@ def montar_resultado(df: pd.DataFrame, nome_indicador: str, regiao: str, modo: s
 # Figura
 # ---------------------------------------------------------------------------
 
+_COR_BASE = "#93C5FD"
+_COR_MAIOR = "#2563EB"
+_COR_MENOR = "#94A3B8"
+_COR_TEXTO = "#1E293B"
+_COR_GRADE = "#E2E8F0"
+_COR_FAIXA_INSIGHT = "#EFF6FF"
+_COR_BORDA_INSIGHT = "#BFDBFE"
+
 def montar_figura(df_ordenado: pd.DataFrame, nome_indicador: str, regiao: str, sufixo: str = "", insight: str = None) -> dict:
     recorte = "Brasil" if not regiao or regiao.strip().lower() == "brasil" else regiao
     label_valor = f"{nome_indicador} ({sufixo})" if sufixo else nome_indicador
 
     if df_ordenado.empty:
-        fig = px.bar(title=f"{nome_indicador} — {recorte} (sem dados no recorte)")
+        fig = go.Figure()
+        fig.update_layout(
+            title=dict(text=f"{nome_indicador} — {recorte} (sem dados no recorte)", x=0.02),
+            template="plotly_white",
+        )
         return json.loads(fig.to_json())
 
-    fig = px.bar(
-        df_ordenado,
-        x="valor",
-        y="nome",
-        orientation="h",
-        labels={"valor": label_valor, "nome": ""},
-        title=f"{nome_indicador} por estado — {recorte} ({len(df_ordenado)} estados)",
+    n = len(df_ordenado)
+
+    cores_barras = [_COR_BASE] * n
+    if n >= 1:
+        cores_barras[0] = _COR_MAIOR
+    if n >= 2:
+        cores_barras[-1] = _COR_MENOR
+
+    texto_barras = [formatar_numero(v, sufixo=sufixo) for v in df_ordenado["valor"]]
+
+    fig = go.Figure(
+        go.Bar(
+            x=df_ordenado["valor"],
+            y=df_ordenado["nome"],
+            orientation="h",
+            marker=dict(color=cores_barras, line=dict(width=0)),
+            text=texto_barras,
+            textposition="outside",
+            textfont=dict(size=12, color=_COR_TEXTO),
+            hovertemplate="<b>%{y}</b><br>" + label_valor + ": %{x:,.2f}<extra></extra>",
+        )
     )
 
-    fig.update_yaxes(autorange="reversed")
+    fig.update_layout(
+        template="plotly_white",
+        title=dict(
+            text=f"<b>{nome_indicador.capitalize()} por estado</b> — {recorte} ({n} estados)",
+            x=0.02,
+            xanchor="left",
+            font=dict(size=20, color=_COR_TEXTO),
+        ),
+        font=dict(family="Inter, Segoe UI, Arial, sans-serif", size=13, color=_COR_TEXTO),
+        margin=dict(l=10, r=40, t=70, b=40),
+        showlegend=False,
+        bargap=0.25,
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        yaxis=dict(
+            autorange="reversed",
+            showgrid=False,
+            title=None,
+            tickfont=dict(size=13),
+        ),
+        xaxis=dict(
+            title=label_valor,
+            showgrid=True,
+            gridcolor=_COR_GRADE,
+            zeroline=False,
+        ),
+    )
 
-    margem_inferior = 10
     if insight:
-        texto_insight = insight.replace("\n", "<br>")
+        texto_insight = insight.replace("\n", "<br>").strip()
+
         fig.add_annotation(
-            text=texto_insight,
-            xref="paper", yref="paper",
-            x=0, y=0,
-            xanchor="left", yanchor="top",
-            yshift=-45,
+            text=f"💡 {texto_insight}",
+            xref="x domain", yref="y domain",
+            x=0.98, y=0.04,
+            xanchor="right", yanchor="bottom",
             showarrow=False,
             align="left",
-            bgcolor="rgba(255,255,255,0.92)",
-            bordercolor="#dddddd",
-            borderwidth=1,
-            borderpad=8,
-            font=dict(size=12, color="#333333"),
+            font=dict(size=17, color=_COR_TEXTO),
+            bgcolor="rgba(255,255,255,0.96)",
+            bordercolor=_COR_BORDA_INSIGHT,
+            borderwidth=1.5,
+            borderpad=12,
+            width=470,
         )
-        margem_inferior = 110
-
-    fig.update_layout(margin=dict(l=10, r=10, t=60, b=margem_inferior))
 
     return json.loads(fig.to_json())
-
-
 # ---------------------------------------------------------------------------
 # Modelos / Enums da API
 # ---------------------------------------------------------------------------
@@ -356,6 +403,7 @@ def montar_figura(df_ordenado: pd.DataFrame, nome_indicador: str, regiao: str, s
 def normalizar(texto):
   texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
   return texto.strip().lower().replace(" ", "_").replace("-", "_")
+
 class Indicador(str, Enum):
   area = "area"
   densidade = "densidade"
